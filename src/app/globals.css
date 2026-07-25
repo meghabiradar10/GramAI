@@ -1,21 +1,77 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f8fafc;
+  --foreground: #0f172a;
+  
+  --primary: #15803d;     /* Deep green */
+  --primary-foreground: #ffffff;
+  
+  --secondary: #fef08a;   /* Sunlight yellow */
+  --secondary-foreground: #422006;
+  
+  --accent: #ca8a04;      /* Earthy gold */
+  --accent-foreground: #ffffff;
+  
+  --muted: #e2e8f0;
+  --muted-foreground: #64748b;
+  
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+  
+  --border: #e2e8f0;
+  --input: #e2e8f0;
+  --ring: #166534;
+  
+  --radius: 0.75rem;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #022c22;
+    --foreground: #f8fafc;
+    
+    --primary: #22c55e;
+    --primary-foreground: #022c22;
+    
+    --secondary: #422006;
+    --secondary-foreground: #fef08a;
+    
+    --accent: #a16207;
+    --accent-foreground: #f8fafc;
+    
+    --muted: #064e3b;
+    --muted-foreground: #94a3b8;
+    
+    --card: #064e3b;
+    --card-foreground: #f8fafc;
+    
+    --border: #065f46;
+    --input: #065f46;
+    --ring: #4ade80;
   }
 }
 
@@ -23,4 +79,9 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  @apply antialiased selection:bg-primary selection:text-primary-foreground;
+}
+
+.glassmorphism {
+  @apply bg-white/70 dark:bg-black/50 backdrop-blur-md border border-white/20 dark:border-white/10 shadow-lg;
 }
