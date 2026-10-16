@@ -1145,6 +1145,128 @@ async function main() {
     assert.notStrictEqual(result.guidance.cropId, 'tomato');
   });
 
+  // -------------------------------------------------------------
+  // Test 39: Case 39: Potato tuber non-leaf image safely rejected with quality error (Issue 2)
+  // -------------------------------------------------------------
+  await runAsyncTest('Case 39: Potato tuber non-leaf image rejected at quality check before model inference', async () => {
+    // Generate synthetic non-leaf potato tuber image (tan/brown skin and yellowish flesh without chlorophyll)
+    const width = 64;
+    const height = 64;
+    const totalPixels = width * height;
+    const buffer = Buffer.alloc(totalPixels * 4);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = (y * width + x) * 4;
+        // Non-leaf tuber surface texture with micro-variations (sharp edges so not blurry)
+        const texture = ((x * 7 + y * 13) % 23) - 11;
+        buffer[idx] = Math.min(255, Math.max(0, 185 + texture));
+        buffer[idx + 1] = Math.min(255, Math.max(0, 145 + texture));
+        buffer[idx + 2] = Math.min(255, Math.max(0, 95 + texture));
+        buffer[idx + 3] = 255;
+      }
+    }
+    const tuberImg = `data:image/raw-rgba;base64;w=${width};h=${height},${buffer.toString('base64')}`;
+
+    const result = await classifyCropLeaf({
+      imageSrc: tuberImg,
+      selectedCrop: 'potato'
+    });
+
+    assert.strictEqual(result.status, 'quality_error', 'Tuber must be rejected at leaf quality check');
+    assert.strictEqual(result.quality.hasLeafTissue, false, 'Tuber has no leaf chlorophyll tissue');
+    assert.strictEqual(result.quality.isValid, false, 'Quality must be invalid');
+    assert.ok(result.message.includes('diagnoses leaf diseases'), 'Message must inform user that model is for leaves, not tubers');
+    assert.strictEqual(result.guidance, undefined, 'Must not provide treatment guidance for tubers');
+    assert.notStrictEqual(result.status, 'unsupported_crop', 'Must not misclassify tuber as an unsupported fruit/crop');
+    assert.ok(!result.message.includes('Orange'), 'Must never misclassify potato tuber as Orange');
+  });
+
+  // -------------------------------------------------------------
+  // Test 40: Case 40: Maize leaf with rust pustules preserves Maize diagnosis (Issue 1)
+  // -------------------------------------------------------------
+  await runAsyncTest('Case 40: Maize leaf with dense rust pustules does not trigger false Tomato conflict', async () => {
+    const maizeFixturePath = path.resolve('tests/fixtures/real-maize-leaf.txt');
+    assert.ok(fs.existsSync(maizeFixturePath), 'real-maize-leaf.txt fixture must exist');
+    const realMaizeLeafImg = fs.readFileSync(maizeFixturePath, 'utf8').trim();
+
+    // 1. Manual Maize selection
+    const manualResult = await classifyCropLeaf({
+      imageSrc: realMaizeLeafImg,
+      selectedCrop: 'maize'
+    });
+    assert.strictEqual(manualResult.status, 'success', 'Maize rust scan must succeed');
+    assert.strictEqual(manualResult.cropDetectionStatus, 'confirmed', 'Crop detection must be confirmed');
+    assert.strictEqual(manualResult.guidance?.cropId, 'maize');
+    assert.strictEqual(manualResult.guidance?.diseaseId, 'maize_common_rust');
+    assert.strictEqual(manualResult.cropConflictWarning, undefined, 'Must not flag false Tomato crop conflict');
+
+    // 2. Auto-detect mode
+    const autoResult = await classifyCropLeaf({
+      imageSrc: realMaizeLeafImg,
+      selectedCrop: 'auto'
+    });
+    assert.strictEqual(autoResult.status, 'success', 'Auto-detect must succeed for maize leaf');
+    assert.strictEqual(autoResult.detectedCrop, 'maize', 'Auto-detect must establish maize, not tomato');
+    assert.strictEqual(autoResult.cropDetectionStatus, 'confirmed');
+    assert.strictEqual(autoResult.guidance?.cropId, 'maize');
+    assert.strictEqual(autoResult.guidance?.diseaseId, 'maize_common_rust');
+  });
+
+  // -------------------------------------------------------------
+  // Test 41: Case 41: Tomato leaf with distributed multi-class probabilities (Issue 3)
+  // -------------------------------------------------------------
+  await runAsyncTest('Case 41: Tomato leaf with distributed probabilities correctly resolves to Tomato, not Grape', async () => {
+    const tomatoLeafImg = createSyntheticImageDataUrl({
+      venation: 'reticulate',
+      symptomType: 'necrotic',
+      baseColor: [45, 125, 40]
+    });
+
+    // Multi-class fragmented distribution: individual Grape class is 25%, but cumulative Tomato mass is 56%
+    const mockMultiClassTomatoResult = {
+      isModelInference: true,
+      detectedCrop: 'tomato',
+      detectedCropSpecies: 'Tomato',
+      cropConfidence: 0.56,
+      maizeProbMass: 0.04,
+      tomatoProbMass: 0.56,
+      potatoProbMass: 0.05,
+      otherProbMass: 0.35,
+      topPrediction: {
+        classIndex: 11,
+        label: 'Grape with Black Rot',
+        crop: 'other',
+        diseaseId: undefined,
+        probability: 0.25,
+      },
+      allPredictions: [
+        { classIndex: 11, label: 'Grape with Black Rot', crop: 'other', probability: 0.25 },
+        { classIndex: 29, label: 'Tomato with Early Blight', crop: 'tomato', diseaseId: 'tomato_early_blight', probability: 0.22 },
+        { classIndex: 32, label: 'Tomato with Septoria Leaf Spot', crop: 'tomato', diseaseId: 'tomato_septoria_leaf_spot', probability: 0.20 },
+        { classIndex: 30, label: 'Tomato with Late Blight', crop: 'tomato', diseaseId: 'tomato_late_blight', probability: 0.14 },
+      ],
+      maizePredictions: [],
+      tomatoPredictions: [
+        { diseaseId: 'tomato_early_blight', name: 'Early Blight', cropId: 'tomato', probability: 0.3929 },
+        { diseaseId: 'tomato_septoria_leaf_spot', name: 'Septoria Leaf Spot', cropId: 'tomato', probability: 0.3571 },
+        { diseaseId: 'tomato_late_blight', name: 'Late Blight', cropId: 'tomato', probability: 0.2500 },
+      ],
+      potatoPredictions: [],
+    };
+
+    const result = await classifyCropLeaf({
+      imageSrc: tomatoLeafImg,
+      selectedCrop: 'auto',
+      mockModelResult: mockMultiClassTomatoResult,
+    });
+
+    assert.notStrictEqual(result.status, 'unsupported_crop', 'Must not be rejected as an unsupported crop');
+    assert.strictEqual(result.detectedCrop, 'tomato', 'Detected crop must be tomato');
+    assert.strictEqual(result.cropDetectionStatus, 'confirmed', 'Crop must be confirmed as tomato');
+    assert.ok(result.topCandidates || result.guidance, 'Must provide tomato candidates or diagnosis');
+    assert.ok(!result.message?.includes('Grape'), 'Must NEVER misclassify tomato as Grape');
+  });
+
   console.log(`\n========================================`);
   console.log(`Test Results: ${passedTests}/${totalTests} tests passed.`);
   console.log(`========================================\n`);

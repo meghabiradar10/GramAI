@@ -136,12 +136,22 @@ export async function classifyCropLeaf(
     modelResult.detectedCropSpecies ||
     (modelCrop === 'other' ? 'an unsupported crop' : cropDisplayName(modelCrop));
 
-  // Do not let a high score for an unsupported species enter a supported
-  // crop's disease list.
+  const selectedCropMass =
+    selectedCrop === 'maize'
+      ? modelResult.maizeProbMass
+      : selectedCrop === 'tomato'
+        ? modelResult.tomatoProbMass
+        : selectedCrop === 'potato'
+          ? modelResult.potatoProbMass
+          : 0;
+
+  // Do not let an unsupported species enter a supported crop's diagnosis.
   const isStrongUnsupportedModel =
     topModelCrop === 'other' &&
-    (modelResult.topPrediction.probability >= 0.25 ||
-      modelResult.otherProbMass >= 0.70);
+    modelCrop === 'other' &&
+    (modelResult.otherProbMass >= 0.70 ||
+      (modelResult.topPrediction.probability >= 0.35 &&
+        modelResult.otherProbMass > selectedCropMass * 1.5));
 
   if (isStrongUnsupportedModel) {
     const expectedCrop = isSupportedCrop(selectedCrop)
@@ -184,8 +194,8 @@ export async function classifyCropLeaf(
   // Preserve the existing Maize/Tomato morphology conflict safeguards.
   if (
     selectedCrop === 'maize' &&
-    (features.dominantCropCandidate === 'tomato' ||
-      (modelCrop === 'tomato' && features.reticulateVeinScore > 0.30))
+    ((modelCrop === 'tomato' && features.reticulateVeinScore > 0.30) ||
+      (features.dominantCropCandidate === 'tomato' && modelCrop !== 'maize'))
   ) {
     return {
       status: 'uncertain',
@@ -203,11 +213,12 @@ export async function classifyCropLeaf(
 
   if (
     selectedCrop === 'tomato' &&
-    (features.dominantCropCandidate === 'maize' ||
-      (modelCrop === 'maize' &&
-        modelResult.cropConfidence >= 0.50 &&
-        (features.aspectRatio > 1.30 ||
-          features.parallelVeinScore > 0.10)))
+    ((modelCrop === 'maize' &&
+      modelResult.cropConfidence >= 0.50 &&
+      (features.aspectRatio > 1.30 ||
+        features.parallelVeinScore > 0.10 ||
+        features.rustPustuleRatio > 0.02)) ||
+      (features.dominantCropCandidate === 'maize' && modelCrop !== 'tomato'))
   ) {
     return {
       status: 'uncertain',
@@ -233,18 +244,24 @@ export async function classifyCropLeaf(
 
   if (isSupportedCrop(selectedCrop)) {
     // An explicit crop choice is not proof that the model agrees.
+    const conflictingModelCrop =
+      modelCrop !== selectedCrop && isSupportedCrop(modelCrop)
+        ? modelCrop
+        : topModelCrop !== selectedCrop && isSupportedCrop(topModelCrop)
+          ? topModelCrop
+          : undefined;
+
     if (
-      topModelCrop !== selectedCrop &&
-      modelResult.cropConfidence >= 0.60 &&
-      isSupportedCrop(topModelCrop)
+      conflictingModelCrop &&
+      modelResult.cropConfidence >= 0.60
     ) {
       return {
         status: 'uncertain',
         selectedCrop,
-        detectedCrop: topModelCrop,
+        detectedCrop: conflictingModelCrop,
         cropDetectionStatus: 'conflict',
         cropConflictWarning:
-          `The model's strongest crop prediction is ${cropDisplayName(topModelCrop)}, not ${cropDisplayName(selectedCrop)}. Disease guidance was blocked.`,
+          `The model's strongest crop prediction is ${cropDisplayName(conflictingModelCrop)}, not ${cropDisplayName(selectedCrop)}. Disease guidance was blocked.`,
         quality: features.quality,
         message:
           'The selected crop and model prediction do not agree. Please check the image and crop selection.',
@@ -254,22 +271,26 @@ export async function classifyCropLeaf(
 
     resolvedCrop = selectedCrop;
     cropDetectionStatus =
-      topModelCrop === selectedCrop ? 'confirmed' : 'user_selected';
+      topModelCrop === selectedCrop || modelCrop === selectedCrop
+        ? 'confirmed'
+        : 'user_selected';
   } else {
     // Auto-detect Maize and Tomato using the existing morphology rules.
     if (
-      features.dominantCropCandidate === 'maize' ||
+      (features.dominantCropCandidate === 'maize' && modelCrop !== 'tomato') ||
       (modelCrop === 'maize' &&
-        modelResult.cropConfidence >= 0.60 &&
+        modelResult.cropConfidence >= 0.50 &&
         (features.aspectRatio > 1.30 ||
-          features.parallelVeinScore > 0.10))
+          features.parallelVeinScore > 0.10 ||
+          features.rustPustuleRatio > 0.02 ||
+          (features.midribRatio ?? 0) > 0.02))
     ) {
       resolvedCrop = 'maize';
       cropDetectionStatus = 'confirmed';
     } else if (
-      features.dominantCropCandidate === 'tomato' ||
+      (features.dominantCropCandidate === 'tomato' && modelCrop !== 'maize') ||
       (modelCrop === 'tomato' &&
-        modelResult.cropConfidence >= 0.60 &&
+        modelResult.cropConfidence >= 0.50 &&
         features.reticulateVeinScore > 0.20)
     ) {
       resolvedCrop = 'tomato';

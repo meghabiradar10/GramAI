@@ -260,17 +260,36 @@ export async function runModelInference(imageSrc: string): Promise<ModelInferenc
   }
 
   let detectedCrop: SupportedCrop | 'other' = 'other';
-  let cropConfidence = topPrediction.probability;
+  let cropConfidence = otherProbMass;
+  let detectedCropSpecies = extractCropSpeciesName(topPrediction.label);
 
-  if (topPrediction.crop === 'maize' && maizeProbMass > 0.40) {
-    detectedCrop = 'maize';
-    cropConfidence = maizeProbMass;
-  } else if (topPrediction.crop === 'tomato' && tomatoProbMass > 0.40) {
+  if (
+    tomatoProbMass >= 0.40 &&
+    tomatoProbMass > otherProbMass &&
+    tomatoProbMass > maizeProbMass &&
+    tomatoProbMass > potatoProbMass
+  ) {
     detectedCrop = 'tomato';
     cropConfidence = tomatoProbMass;
-  } else if (topPrediction.crop === 'potato' && potatoProbMass > 0.40) {
+    detectedCropSpecies = 'Tomato';
+  } else if (
+    maizeProbMass >= 0.40 &&
+    maizeProbMass > otherProbMass &&
+    maizeProbMass > tomatoProbMass &&
+    maizeProbMass > potatoProbMass
+  ) {
+    detectedCrop = 'maize';
+    cropConfidence = maizeProbMass;
+    detectedCropSpecies = 'Maize (Corn)';
+  } else if (
+    potatoProbMass >= 0.40 &&
+    potatoProbMass > otherProbMass &&
+    potatoProbMass > maizeProbMass &&
+    potatoProbMass > tomatoProbMass
+  ) {
     detectedCrop = 'potato';
     cropConfidence = potatoProbMass;
+    detectedCropSpecies = 'Potato';
   } else {
     cropConfidence = otherProbMass;
   }
@@ -293,7 +312,7 @@ export async function runModelInference(imageSrc: string): Promise<ModelInferenc
   return {
     isModelInference: true,
     detectedCrop,
-    detectedCropSpecies: extractCropSpeciesName(topPrediction.label),
+    detectedCropSpecies,
     cropConfidence: Number(cropConfidence.toFixed(4)),
     maizeProbMass: Number(maizeProbMass.toFixed(4)),
     tomatoProbMass: Number(tomatoProbMass.toFixed(4)),

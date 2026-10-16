@@ -41,6 +41,7 @@ export function analyzePixelData(
   let totalB = 0;
 
   let plantPixels = 0;
+  let greenPlantPixels = 0;
   let necroticPixels = 0;
   let chloroticPixels = 0;
   let rustPustulePixels = 0;
@@ -80,8 +81,11 @@ export function analyzePixelData(
     }
     const sat = max === 0 ? 0 : delta / max;
 
-    // 1. Plant tissue detection (green chlorophyll: Hue 40° to 165°, or dominant G)
-    const isGreenPlant = (g > r * 1.02 && g > b) || (hue >= 38 && hue <= 165 && sat > 0.12) || (exg > 8 && g > 40);
+    // 1. Plant tissue detection (living chlorophyll requires green dominance or green spectrum)
+    const isGreenPlant =
+      (g > r * 1.02 && g > b * 1.02) ||
+      (hue >= 65 && hue <= 165 && sat > 0.15 && g > b) ||
+      (exg > 15 && g > r && g > 40);
     // 2. Rust pustules (reddish/terracotta/cinnamon brown: r > 110, g between 35 and 135, b < 80, r > g * 1.15)
     const isRustPustule = r > 110 && g >= 35 && g <= 135 && b < 80 && r > g * 1.15;
     // 3. Yellowing / Chlorosis (Hue 35° to 62°, high saturation, bright)
@@ -93,6 +97,7 @@ export function analyzePixelData(
     // 5. Pale central midrib typical of monocot / maize blade
     const isMidrib = isGreenPlant && lum > 125 && sat < 0.32 && g > 105 && g > b * 1.08;
 
+    if (isGreenPlant) greenPlantPixels++;
     if (isGreenPlant || isChlorotic || isRustPustule || isNecrotic || isMidrib) {
       plantPixels++;
       if (isRustPustule) rustPustulePixels++;
@@ -137,12 +142,17 @@ export function analyzePixelData(
   const isBlurry = lapVar < 0.8;
   const blurScore = Math.min(1.0, Math.max(0.0, lapVar / 40.0));
 
-  // Leaf presence validation
-  const hasLeafTissue = vegetativeRatio >= 0.18;
+  // Leaf presence validation: A living crop leaf possesses chlorophyll tissue.
+  // Non-leaf plant organs (such as potato tubers, fruit, or roots) lack green chlorophyll.
+  const greenRatio = greenPlantPixels / totalPixels;
+  const hasLeafTissue =
+    vegetativeRatio >= 0.18 &&
+    (greenRatio >= 0.05 || (vegetativeRatio >= 0.35 && greenRatio >= 0.025));
 
   let qualityReason: string | undefined;
   if (!hasLeafTissue) {
-    qualityReason = 'No crop leaf detected in image. Please ensure a plant leaf fills the photo.';
+    qualityReason =
+      'No crop leaf detected in image. The AI Crop Doctor diagnoses leaf diseases. Please upload a clear photo of an affected leaf, not a tuber, root, or fruit.';
   } else if (isBlurry) {
     qualityReason = 'Image is too blurry to detect symptoms accurately. Please upload a sharper photo.';
   } else if (avgBrightness < 0.08) {
@@ -237,17 +247,23 @@ export function analyzePixelData(
 
   const reticulateVeinScore = Math.min(
     1.0,
-    multiAngleMeshScore * 1.5 * edgeTextureFactor * meshDensityFactor * Math.max(0, 1.0 - parallelVeinScore * 2.0)
+    multiAngleMeshScore *
+      1.5 *
+      edgeTextureFactor *
+      meshDensityFactor *
+      Math.max(0, 1.0 - parallelVeinScore * 2.0) *
+      Math.max(0, 1.0 - rustPustuleRatio * 12.0)
   );
 
   const aspectRatio = Number((width / height).toFixed(2));
   const isElongated = aspectRatio > 1.35 || aspectRatio < 0.74;
 
   // Independent Evidence Scores
-  // Maize: elongated geometry, parallel venation, or prominent central midrib
+  // Maize: elongated geometry, parallel venation, prominent central midrib, or rust pustules
   let maizeScore = parallelVeinScore * 2.5;
   if (isElongated && parallelVeinScore > 0.10) maizeScore += 1.0;
   if (midribRatio > 0.025) maizeScore += 1.0;
+  if (rustPustuleRatio > 0.02) maizeScore += 1.5;
 
   // Tomato: reticulate multi-angle venation
   let tomatoScore = reticulateVeinScore * 2.5;
