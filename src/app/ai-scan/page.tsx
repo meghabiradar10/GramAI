@@ -461,6 +461,8 @@ export default function AiScanPage() {
                               Closest Partial Matches (Unverified) for{" "}
                               {result.detectedCrop === "maize" || result.selectedCrop === "maize"
                                 ? "Maize (Corn)"
+                                : result.detectedCrop === "potato" || result.selectedCrop === "potato"
+                                ? "Potato"
                                 : "Tomato"}
                               :
                             </span>
